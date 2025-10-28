@@ -8,6 +8,7 @@
 - **同期的な顔照合**: 非同期が理想だが、PoCでは同期呼び出し（`API.post`）でシンプルに実装
 - **DynamoDB保存**: 更新フローを実現するため、Liveness写真キーを永続化
 - **並行処理によるUX最適化**: S3アップロードとDB確認を並行実行し、体感ローディング時間を50%短縮
+- **最小権限の原則**: 認証済みユーザーのみがLivenessやS3にアクセス可能
 
 ## マイルストーン 1: クリーンアップと3画面の骨格作成
 
@@ -110,19 +111,39 @@
 
 ---
 
-## マイルストーン 5: バックエンド - Livenessの設定
+## マイルストーン 5: バックエンド - Liveness IAMポリシー設定
 
-### タスク5.1: Livenessライブラリのインストール
+> **参考**: [公式ドキュメント Step 1](https://ui.docs.amplify.aws/react/connected-components/liveness)（補足事項も参照）
 
-`amplify/` ディレクトリで `@aws-amplify/backend-liveness` をインストール（`npm install @aws-amplify/backend-liveness`）。
+### 実装方針
 
-### タスク5.2: Livenessリソースの追加
+`amplify/backend.ts`にIAMポリシーを追加：
 
-`amplify/backend.ts` を編集：
+- Rekognition `StartFaceLivenessSession` アクションへのアクセスを許可
+- **プロジェクト固有の判断**:
+  - ✅ 認証済みユーザーのみアクセス許可（最小権限の原則）
+  - ❌ ゲストユーザーへのアクセスは不許可
 
-- `@aws-amplify/backend-liveness` から `defineLiveness` をインポート
-- Livenessリソースを定義し、`defineBackend` に追加
-- これにより、LivenessセッションAPI（セッション作成・取得）とLambda関数が自動でプロビジョニングされる
+詳細な実装手順は公式ドキュメント Step 1を参照。
+
+---
+
+## マイルストーン 5.5: バックエンド - Liveness Session API
+
+> **参考**: [Amazon Rekognition Face Liveness developer guide](https://docs.aws.amazon.com/rekognition/latest/dg/face-liveness.html)（Amplify UI Liveness公式ドキュメントのPrerequisites 2、補足事項も参照）
+
+### 実装方針
+
+Liveness Session（セッションID生成・結果取得）用のバックエンドAPIを作成：
+
+- **Session作成API**: フロントエンドから呼び出し、Rekognition `CreateFaceLivenessSession` を実行してセッションIDを返す
+- **Session結果取得API**: セッションID受け取り、Rekognition `GetFaceLivenessSessionResults` で結果を返す
+
+**プロジェクト固有の判断**:
+- 認証済みユーザーのみアクセス可能
+- Amplify Function（Lambda）とAPI Gatewayを使用
+
+詳細な実装手順は [Amazon Rekognition Face Liveness developer guide](https://docs.aws.amazon.com/rekognition/latest/dg/face-liveness.html) を参照。
 
 ---
 
@@ -206,22 +227,30 @@ const [uploadResult, dbResult] = await Promise.all([
 
 ## マイルストーン 8: 画面B（Livenessチェック）の実装
 
-### タスク8.1: FaceLivenessDetectorの組み込み
+> **参考**: [公式ドキュメント Step 2 & 4](https://ui.docs.amplify.aws/react/connected-components/liveness#step-2-install-dependencies)（補足事項も参照）
+
+### タスク8.1: 依存関係のインストール
+
+- `@aws-amplify/ui-react-liveness` をインストール（公式ドキュメント Step 2参照）
+
+### タスク8.2: FaceLivenessDetectorの組み込み
 
 `src/screens/LivenessScreen.tsx` を編集：
 
 - `@aws-amplify/ui-react-liveness` から `FaceLivenessDetector` をインポート
-- Livenessセッションの作成・管理ロジックを実装
+- Livenessセッション作成APIを呼び出し、セッションIDを取得
 - `FaceLivenessDetector` コンポーネントを配置
+
+詳細な実装手順は公式ドキュメント Step 4を参照。
 
 **注**: Liveness中はカメラストリーミングUIなので、ローディング表示は不要です。
 
-### タスク8.2: 結果ハンドリングの実装
+### タスク8.3: 結果ハンドリングの実装
 
 - Livenessチェック成功時、返ってきたS3キー（Liveness写真）を `PoCContext` の `livenessImageKey` に保存
 - `/result` に自動遷移（`useNavigate`）
 
-### タスク8.3: エラーハンドリング
+### タスク8.4: エラーハンドリング
 
 - Livenessチェック失敗時のエラー表示
 - リトライボタンの配置
@@ -269,6 +298,17 @@ const [uploadResult, dbResult] = await Promise.all([
 
 ## 補足事項
 
+### 公式ドキュメント
+
+本PoCの実装にあたり、以下の公式ドキュメントを参照してください：
+
+- **[Amplify UI Face Liveness](https://ui.docs.amplify.aws/react/connected-components/liveness)**: Livenessの全体実装ガイド
+  - Prerequisites 2: Liveness Session API作成 → マイルストーン5.5（[Amazon Rekognition developer guide](https://docs.aws.amazon.com/rekognition/latest/dg/face-liveness.html)参照）
+  - Step 1: IAMポリシー設定 → マイルストーン5
+  - Step 2: 依存関係インストール → マイルストーン8
+  - Step 3: Initialize Amplify → ✅ 既に完了（`src/main.tsx`）
+  - Step 4: フロントエンド実装 → マイルストーン8
+
 ### フロントエンドの依存関係
 
 以下のnpmパッケージをインストール：
@@ -278,10 +318,9 @@ const [uploadResult, dbResult] = await Promise.all([
 
 ### バックエンドの依存関係
 
-`amplify/` ディレクトリで以下をインストール：
-
-- `@aws-amplify/backend-liveness` (Livenessバックエンド自動生成)
-- Lambda関数内で `@aws-sdk/client-rekognition` と `@aws-sdk/client-s3` (顔照合用)
+- **Liveness IAMポリシー**: 追加パッケージ不要（既存の `aws-cdk-lib` を使用）
+- **Liveness Session Lambda**: `@aws-sdk/client-rekognition` (CreateFaceLivenessSession, GetFaceLivenessSessionResults)
+- **顔照合Lambda**: `@aws-sdk/client-rekognition`, `@aws-sdk/client-s3`
 
 ### ローディング表示が必要な箇所
 
