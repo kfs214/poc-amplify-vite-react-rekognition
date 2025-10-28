@@ -5,7 +5,9 @@ import { data } from './data/resource';
 import { storage } from './storage/resource';
 import { createLivenessSession } from './functions/create-liveness-session/resource';
 import { getLivenessSessionResults } from './functions/get-liveness-session-results/resource';
+import { compareFaces } from './functions/compare-faces/resource';
 import { configureLivenessApi } from './liveness-api/resource';
+import { configureCompareApi } from './compare-api/resource';
 
 const backend = defineBackend({
   auth,
@@ -13,6 +15,7 @@ const backend = defineBackend({
   storage,
   createLivenessSession,
   getLivenessSessionResults,
+  compareFaces,
 });
 
 // Liveness用のIAMポリシー設定（最小権限の原則）
@@ -65,4 +68,41 @@ configureLivenessApi(
   backend as any,
   backend.createLivenessSession.resources.lambda,
   backend.getLivenessSessionResults.resources.lambda
+);
+
+// 顔照合Lambda関数の権限設定
+// Rekognition CompareFaces権限
+const compareFacesRekognitionPolicy = new PolicyStatement({
+  actions: ['rekognition:CompareFaces'],
+  resources: ['*'],
+});
+
+backend.compareFaces.resources.lambda.addToRolePolicy(compareFacesRekognitionPolicy);
+
+// S3読み取り権限（プロフィール画像とLiveness画像の取得）
+const s3ReadPolicy = new PolicyStatement({
+  actions: ['s3:GetObject'],
+  resources: [
+    `${backend.storage.resources.bucket.bucketArn}/profileImages/*`,
+    `${backend.storage.resources.bucket.bucketArn}/livenessImages/*`,
+  ],
+});
+
+backend.compareFaces.resources.lambda.addToRolePolicy(s3ReadPolicy);
+
+// 顔照合Lambda関数に環境変数を設定
+backend.compareFaces.addEnvironment(
+  'STORAGE_BUCKET_NAME',
+  backend.storage.resources.bucket.bucketName
+);
+
+backend.compareFaces.addEnvironment(
+  'ALLOWED_ORIGINS',
+  'http://localhost:5173'
+);
+
+// Compare API設定
+configureCompareApi(
+  backend as any,
+  backend.compareFaces.resources.lambda
 );
