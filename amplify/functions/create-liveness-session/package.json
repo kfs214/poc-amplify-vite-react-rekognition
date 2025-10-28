@@ -1,0 +1,12 @@
+{
+  "name": "create-liveness-session",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-rekognition": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.109"
+  }
+}
+
